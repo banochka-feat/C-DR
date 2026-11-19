@@ -68,6 +68,8 @@ body.portrait .dpad{width:160px;height:84px}
   color:var(--fg);text-shadow:4px 4px 0 var(--hot),8px 8px 0 var(--sun)}
 .tsub{margin:0;font-family:var(--display);letter-spacing:.32em;font-size:clamp(13px,3.4vmin,18px);color:var(--sea)}
 .tdesc{margin:4px 0 6px;max-width:34ch;color:var(--muted);font-size:15px;line-height:1.4}
+.vbtn{all:unset;cursor:pointer;font-size:13px;color:var(--fg);border:1.5px solid var(--line);padding:6px 14px;border-radius:999px}
+.vbtn:focus-visible{outline:2px solid var(--fg)}
 .hint{margin:4px 0 0;font-size:12.5px;color:var(--muted)}
 body.landscape .rot{display:none}
 @media (pointer:coarse){.keys{display:none}}
@@ -124,8 +126,10 @@ body.landscape .rot{display:none}
       <div class="ttext">
         <h1>ЯРИК</h1>
         <p class="tsub">ПЛЯЖНЫЙ ЗАМЕС</p>
-        <p class="tdesc">Чайка утащила наушник Ярика. На пути к маяку его ждут три бойца.</p>
+        <p class="tdesc">Чайка утащила наушник Ярика и подкупила пацанов картошкой фри. До маяка шесть боёв.</p>
         <button class="btn" id="play">Играть</button>
+        <button class="vbtn" id="voiceBtn">Робоголос: вкл</button>
+        <p class="hint">Осторожно: персонажи матерятся</p>
         <p class="hint rot">Поверни телефон боком, так удобнее драться</p>
         <p class="hint keys">На компе: ← → ходить, ↑ прыжок, J удар, K нога, L блок, пробел супер</p>
       </div>
@@ -157,7 +161,7 @@ body.landscape .rot{display:none}
       <div class="eyebrow">НАУШНИК ВОЗВРАЩЁН</div>
       <img class="eface" id="eFace" alt="Ярик">
       <h2>ЯРИК</h2>
-      <p>Легенда пляжа. Чайки теперь облетают его стороной.</p>
+      <p>Легенда пляжа. Чайки облетают его стороной, а Андрей, Максим и Миша носят ему картошку.</p>
       <div class="stats">
         <div><b id="stTime">0:00</b><span>время</span></div>
         <div><b id="stHits">0</b><span>попаданий</span></div>
@@ -233,6 +237,7 @@ const KEYS = { ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'righ
   KeyJ: 'punch', KeyK: 'kick', KeyL: 'block', ArrowDown: 'block', KeyS: 'block', Space: 'super', KeyI: 'super' };
 addEventListener('keydown', e => {
   audioInit();
+  if (e.code === 'KeyM') { setVoice(!voiceOn); return; }
   if (game.phase === 'story' && (e.code === 'Enter' || e.code === 'Space')) { e.preventDefault(); storyTap(); return; }
   const k = KEYS[e.code]; if (!k) return;
   e.preventDefault();
@@ -271,14 +276,51 @@ const sfx = {
   bell() { tone(660, .25, 'triangle', .1); setTimeout(() => tone(990, .4, 'triangle', .1), 120); }
 };
 const vib = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch (_) {} };
+const VOX = { narr: { p: 1, r: 1.05 }, yarik: { p: 1.05, r: 1.15 }, crab: { p: .3, r: .9 }, jelly: { p: 1.9, r: 1.2 }, gull: { p: 1.7, r: 1.4 },
+  andrey: { p: .75, r: .8 }, maxim: { p: 1.35, r: 1.45 }, misha: { p: .55, r: 1.2 } };
+let voiceOn = true, ruVoice = null, barkCd = 0;
+try { voiceOn = localStorage.getItem('yarikVoice') !== 'off'; } catch (_) {}
+const synth = window.speechSynthesis || null;
+function pickVoice() { try { const vs = synth.getVoices(); ruVoice = vs.find(v => /^ru/i.test(v.lang) && /google|milena|yuri|katya/i.test(v.name)) || vs.find(v => /^ru/i.test(v.lang)) || null; } catch (_) {} }
+if (synth) { pickVoice(); try { synth.addEventListener('voiceschanged', pickVoice); } catch (_) {} }
+function say(text, who) {
+  if (!voiceOn || !synth) return;
+  try {
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text.replace(/[«»*]/g, ''));
+    u.lang = 'ru-RU'; if (ruVoice) u.voice = ruVoice;
+    const v = VOX[who] || VOX.narr; u.pitch = v.p; u.rate = v.r; u.volume = 1;
+    synth.speak(u);
+  } catch (_) {}
+}
+function setVoice(on) {
+  voiceOn = on; try { localStorage.setItem('yarikVoice', on ? 'on' : 'off'); } catch (_) {}
+  $('voiceBtn').textContent = 'Робоголос: ' + (on ? 'вкл' : 'выкл');
+  if (!on && synth) try { synth.cancel(); } catch (_) {}
+}
+function bark(f, type, force) {
+  const lines = BARK[f.kind] && BARK[f.kind][type]; if (!lines) return false;
+  if (!force && (frame < barkCd || Math.random() > .5)) return false;
+  const line = lines[Math.floor(Math.random() * lines.length)];
+  bubbles = bubbles.filter(b => b.f !== f); bubbles.push({ f, text: line, life: 130 });
+  say(line, f.kind); barkCd = frame + 140; return true;
+}
+
 
 /* ---------------- data ---------------- */
 const LEVELS = [
-  { kind: 'crab', name: 'КРАБ БИЦЕПС', place: 'ПЛЯЖ', hp: 85, speed: 2.0, w: 110, h: 96, atkCd: [55, 95], block: .12, specCd: [230, 340],
+  { kind: 'crab', name: 'КРАБ БИЦЕПС', place: 'ПЛЯЖ', bg: 0, hp: 85, speed: 2.0, w: 110, h: 96, atkCd: [55, 95], block: .12, specCd: [230, 340],
     basic: { dur: 30, a: [13, 18], range: 100, dmg: 7, kb: 6, stun: 16, hs: 4, hyF: .5 } },
-  { kind: 'jelly', name: 'МЕДУЗА ЗИЗИ', place: 'ПИРС', hp: 100, speed: 1.8, w: 90, h: 150, atkCd: [45, 80], block: .2, specCd: [200, 300],
+  { kind: 'andrey', name: 'АНДРЕЙ «КОШЕРНАЯ ЖОПА»', place: 'ПЛЯЖНОЕ КАФЕ', bg: 0, hp: 95, speed: 2.4, w: 56, h: 170, atkCd: [50, 85], block: .15, specCd: [160, 260],
+    basic: { dur: 22, a: [7, 11], range: 82, dmg: 7, kb: 5, stun: 15, hs: 3, hyF: .6 },
+    heavy: { dur: 46, a: [20, 27], range: 112, dmg: 13, kb: 13, stun: 26, hs: 6, hyF: .45 } },
+  { kind: 'jelly', name: 'МЕДУЗА ЗИЗИ', place: 'ПИРС', bg: 1, hp: 100, speed: 1.8, w: 90, h: 150, atkCd: [45, 80], block: .2, specCd: [200, 300],
     basic: { dur: 28, a: [12, 18], range: 105, dmg: 8, kb: 6, stun: 16, hs: 4, hyF: .35 } },
-  { kind: 'gull', name: 'КОРОЛЬ ЧАЕК ГАВРИЛА', place: 'МАЯК', hp: 130, speed: 3.0, w: 80, h: 140, atkCd: [35, 65], block: .28, specCd: [150, 240],
+  { kind: 'maxim', name: 'МАКСИМ «РЫЖИЙ»', place: 'КОНЕЦ ПИРСА', bg: 1, hp: 105, speed: 2.6, w: 56, h: 170, atkCd: [45, 80], block: .2, specCd: [140, 220], proj: 'words',
+    basic: { dur: 22, a: [7, 11], range: 82, dmg: 8, kb: 5, stun: 15, hs: 3, hyF: .6 } },
+  { kind: 'misha', name: 'МИША «ПАНК»', place: 'У МАЯКА', bg: 2, hp: 115, speed: 3.0, w: 56, h: 170, atkCd: [40, 70], block: .25, specCd: [170, 250],
+    basic: { dur: 22, a: [7, 11], range: 84, dmg: 9, kb: 6, stun: 15, hs: 4, hyF: .6 } },
+  { kind: 'gull', name: 'КОРОЛЬ ЧАЕК ГАВРИЛА', place: 'ВЕРШИНА МАЯКА', bg: 2, hp: 130, speed: 3.0, w: 80, h: 140, atkCd: [35, 65], block: .28, specCd: [150, 240], proj: 'fish',
     basic: { dur: 24, a: [10, 14], range: 88, dmg: 9, kb: 7, stun: 16, hs: 4, hyF: .6 } }
 ];
 const PM = {
@@ -286,45 +328,81 @@ const PM = {
   kick: { dur: 26, a: [8, 14], range: 98, dmg: 10, kb: 8, stun: 20, hs: 5, hyF: .42 },
   super: { dur: 44 }
 };
+const WORDS = ['ЫЫЫ', 'БЛЯ', 'ЭЭЭ', 'КАРОЧ', 'ЁПТА', 'ЭТО САМОЕ', 'НУ ЭТО'];
 const WHO = {
   yarik: { name: 'ЯРИК', col: '#2ec4b6' }, crab: { name: 'КРАБ БИЦЕПС', col: '#ff6b4a' },
-  jelly: { name: 'МЕДУЗА ЗИЗИ', col: '#d77bff' }, gull: { name: 'КОРОЛЬ ЧАЕК ГАВРИЛА', col: '#ffd23f' }, narr: { name: '', col: '#aab1cf' }
+  andrey: { name: 'АНДРЕЙ «КОШЕРНАЯ ЖОПА»', col: '#6f95ff' }, jelly: { name: 'МЕДУЗА ЗИЗИ', col: '#d77bff' },
+  maxim: { name: 'МАКСИМ «РЫЖИЙ»', col: '#ff8a3d' }, misha: { name: 'МИША «ПАНК»', col: '#39e86a' },
+  gull: { name: 'КОРОЛЬ ЧАЕК ГАВРИЛА', col: '#ffd23f' }, narr: { name: '', col: '#aab1cf' }
 };
 const STORY = {
   intro: [
     { who: 'narr', text: 'Солнечный день. Ярик кайфует на пляже, в ухе играет любимый трек.' },
     { who: 'narr', text: 'Вдруг ШУХ! Огромная чайка в короне срывает у него наушник и улетает к маяку.' },
-    { who: 'yarik', text: 'Э! Это мой наушник!' },
-    { who: 'gull', text: 'КРА-КРА! Был твой, стал королевский!' },
-    { who: 'narr', text: 'Путь к маяку идёт через весь пляж. А у короля есть верные слуги.' }
+    { who: 'yarik', text: 'Э, бля! Это мой наушник!' },
+    { who: 'gull', text: 'КРА-КРА! Был твой, стал королевский, сука!' },
+    { who: 'narr', text: 'Король чаек подкупил местных пацанов картошкой фри. Путь к маяку будет весёлым.' }
   ],
   pre: [
-    [{ who: 'crab', text: 'Стоять! Я качаю клешни с рождения. Дальше песка ты не пройдёшь.' },
-     { who: 'yarik', text: 'Посмотрим, кто кого.' }],
+    [{ who: 'crab', text: 'Стоять, нахуй! Я качаю клешни с рождения. Дальше песка ты не пройдёшь.' },
+     { who: 'yarik', text: 'Слышь, креветка переросшая, отойди.' }],
+    [{ who: 'narr', text: 'У пляжного кафе стоит Андрей по кличке Кошерная жопа. Жопа правда впечатляет.' },
+     { who: 'andrey', text: 'Ярик, ты это... короче... ну... не пройдёшь, бля. Мне чайка это... картошку... ну ты понял.' },
+     { who: 'yarik', text: 'Андрюх, ты за картошку фри продался? Пиздец.' },
+     { who: 'andrey', text: 'Не трожь мою... эту... как её... честь! И жопу тоже не трожь.' }],
     [{ who: 'narr', text: 'Пирс. Солнце садится. Из воды поднимается что-то фиолетовое и искрит.' },
-     { who: 'jelly', text: 'Бззз... Наушник ищешь? Сначала я тебя как следует заряжу!' },
-     { who: 'yarik', text: 'Заряжайся без меня.' }],
-    [{ who: 'narr', text: 'Ночь. Маяк. На самом верху блестит корона.' },
-     { who: 'gull', text: 'КРА! Дошёл до моего маяка? Ну смотри, как дерутся короли!' },
-     { who: 'yarik', text: 'Отдай наушник, и разойдёмся.' }]
+     { who: 'jelly', text: 'Бззз... Наушник ищешь? Щас я тебя так заряжу, что волосы дыбом встанут, нахуй!' },
+     { who: 'yarik', text: 'Заряжайся без меня, медуза ебучая.' }],
+    [{ who: 'narr', text: 'В конце пирса стоит рыжий Максим. Он пытается начать фразу уже минут двадцать.' },
+     { who: 'maxim', text: 'Ярик! Ты... ээ... это самое... короче, я тебя щас... как его... отпиздячу! Во! Сказал, бля!' },
+     { who: 'yarik', text: 'Макс, я половину не понял, но давай.' },
+     { who: 'maxim', text: 'Чё ты... это... рыжих не уважаешь? Ща... ну... зауважаешь!' }],
+    [{ who: 'narr', text: 'Ночь. У маяка тусуется Миша. Панк. Без одного зуба.' },
+     { who: 'misha', text: 'Шлышь, Ярик! Король мне новый жуб обещал! Так что щаш ты швои потеряешь, шука!' },
+     { who: 'yarik', text: 'Миш, ты свистишь, когда говоришь.' },
+     { who: 'misha', text: 'Это панк-рок, нахуй! Панки хой!' }],
+    [{ who: 'narr', text: 'Вершина маяка. Блестит корона, в ней торчит наушник.' },
+     { who: 'gull', text: 'КРА! Ты отпиздил всех моих пацанов? Ну смотри, как дерутся короли, сука!' },
+     { who: 'yarik', text: 'Отдай наушник, курица ебаная.' }]
   ],
   post: [
-    [{ who: 'crab', text: 'Ох... клешни отваливаются... Чайка полетела к пирсу. Только там Зизи, осторожно.' }],
-    [{ who: 'jelly', text: 'Бз... разрядилась... Король сидит на маяке, там его гнездо.' }],
-    [{ who: 'gull', text: 'Кра... ладно, ладно! Забирай свою пищалку!' },
-     { who: 'narr', text: 'Ярик забирает наушник. Ни царапины.' },
+    [{ who: 'crab', text: 'Ох, бля... клешни отваливаются... У кафе тебя ждёт Андрей. Удачи, она тебе понадобится.' }],
+    [{ who: 'andrey', text: 'Ох бля... жопа... то есть честь... задета. На пирсе медуза, а потом Максим, он тебя это... ну...' },
+     { who: 'yarik', text: 'Договори хоть раз в жизни, Андрюх.' }],
+    [{ who: 'jelly', text: 'Бз... разрядилась, бля... Дальше Максим. Удачи понять, что он скажет.' }],
+    [{ who: 'maxim', text: 'Бля... я хотел сказать... что-то умное... но слово забыл.' },
+     { who: 'yarik', text: 'Не парься, мы тебя всё равно никогда не понимали.' }],
+    [{ who: 'misha', text: 'Ладно, бля... жубы на мешти? На мешти. Иди к королю. Панки хой...' }],
+    [{ who: 'gull', text: 'Кра... ладно, бля, забирай свою пищалку!' },
+     { who: 'narr', text: 'Ярик забирает наушник. Андрей, Максим и Миша внизу доедают картошку и делают вид, что ничего не было.' },
      { who: 'yarik', text: 'Вот теперь можно дослушать трек.' }]
   ]
 };
+const BARK = {
+  yarik: { atk: ['На, сука!', 'Получай, нахуй!', 'Изи, бля.', 'Чё, больно, да?', 'Это тебе за наушник!'],
+    hurt: ['Ай, бля!', 'Сука!', 'Ёб твою мать!', 'Ну пиздец...'], super: ['Пляжный вихрь, нахуй!', 'Супер-удар, сука!'], ko: ['Бля... я всё...'] },
+  crab: { atk: ['Щёлк, сука!', 'Клешнёй в ебало!'], hurt: ['Мои клешни, бля!', 'Ай, сука!'], spec: ['Рывок, нахуй!'], ko: ['Пиздец клешням...'] },
+  andrey: { atk: ['Щас как... это... ну... на!', 'Кошерная жопа атакует, бля!', 'Получи... это... как его... удар!'],
+    hurt: ['Ай, мля! В жопу не бей... то есть... бля.', 'Э, ну ты это... больно, сука!'], spec: ['ЖОПНЫЙ ТАРАН, НАХУЙ!', 'Жопа... пошла!'], ko: ['Жопа... подвела...'] },
+  jelly: { atk: ['Бзззз, нахуй!', 'Чмок током, сука!'], hurt: ['Ай, я растекаюсь, бля!'], spec: ['Щас ебанёт!', 'Заряжаю, бля!'], ko: ['Бзз... пиздец...'] },
+  maxim: { atk: ['Я тя... это самое... отхуячу!', 'Ыыы, сука, как это... на!', 'На... ну... короче, на!'],
+    hurt: ['Э, бля, не по ры... по рыж... по голове!', 'Ай! Это... ну... нечестно, бля!'], spec: ['СЛОВЕСНЫЙ ПОНОС, СУКА!', 'Щас я... это... скажу!'], ko: ['Я... это... всё, бля...'] },
+  misha: { atk: ['Панки хой, шука!', 'Ирокежом в ебало!', 'Щаш швистну!'],
+    hurt: ['Э, бля, у меня и так одного жуба нет!', 'Шука, больно!'], spec: ['Ирокеж на таран!', 'Панк-прыжок, нахуй!'], ko: ['Панк не шдох... прошто прилёг...'] },
+  gull: { atk: ['КРА, СУКА!', 'Клювом в темечко!'], hurt: ['Мои перья, блять!', 'Кра, больно!'], spec: ['Лови рыбу, сука!', 'Пике, нахуй!'], ko: ['Кра... пиздец короне...'] }
+};
 const LOSE = [
-  { msg: 'Краб поигрывает клешнями: «Приходи, когда подкачаешься».', tip: 'Когда краб трясётся, он сейчас рванёт вперёд. Перепрыгни его или поставь блок.' },
-  { msg: 'Медуза хихикает и искрит: «Бззз-ха-ха!»', tip: 'Медуза светится перед разрядом. Отбеги подальше и бей, пока она остывает.' },
-  { msg: 'Король чаек орёт с маяка: «КРА-ХА-ХА!»', tip: 'От рыбы спасает прыжок или блок. После пике чайка пару секунд открыта, тут и бей.' }
+  { msg: 'Краб поигрывает клешнями: «Приходи, когда подкачаешься, сопля».', tip: 'Когда краб трясётся, он сейчас рванёт вперёд. Перепрыгни его или поставь блок.' },
+  { msg: 'Андрей садится на Ярика сверху: «Это... ну... победа, короче».', tip: 'Когда Андрей разворачивается спиной, жди жопный таран. Отпрыгни назад или ставь блок, потом бей.' },
+  { msg: 'Медуза хихикает и искрит: «Бззз-ха-ха, лошара!»', tip: 'Медуза светится перед разрядом. Отбеги подальше и бей, пока она остывает.' },
+  { msg: 'Максим что-то говорит. Никто не понял, что именно, но звучит обидно.', tip: 'От летящих слов спасает прыжок или блок. Подойди вплотную, вблизи он слабее.' },
+  { msg: 'Миша свистит через дырку в зубах: «Панки хой, шука!»', tip: 'Миша прыгает сверху и бьёт ирокезом с разбега. Уходи из-под прыжка и бей после приземления.' },
+  { msg: 'Король чаек орёт с маяка: «КРА-ХА-ХА, лох!»', tip: 'От рыбы спасает прыжок или блок. После пике чайка пару секунд открыта, тут и бей.' }
 ];
 
 /* ---------------- state ---------------- */
 const game = { phase: 'title', lvl: 0, t: 0, loser: null, stats: { start: 0, hits: 0, loss: 0 } };
-let L = LEVELS[0], P, E, projs = [], parts = [], pops = [];
+let L = LEVELS[0], P, E, projs = [], parts = [], pops = [], bubbles = [];
 let frame = 0, hitstop = 0, slowmo = 0, shakeT = 0, shakeM = 0;
 
 function fighter(o) {
@@ -338,7 +416,7 @@ function setupLevel(i) {
   E = fighter({ kind: L.kind, x: 585, face: -1, w: L.w, h: L.h, hp: L.hp, maxHp: L.hp, dhp: L.hp,
     aiAtk: 70, spec: rand(L.specCd[0], L.specCd[1]) * .5 });
   if (L.kind === 'jelly') E.ground = E.y = G - 12;
-  projs = []; parts = []; pops = []; bgKey = '';
+  projs = []; parts = []; pops = []; bubbles = []; bgKey = '';
 }
 const faceTo = (f, o) => { f.face = o.x >= f.x ? 1 : -1; };
 const shake = m => { if (RM) return; shakeT = 12; shakeM = Math.max(shakeM, m); };
@@ -362,13 +440,14 @@ function damage(att, def, dmg, kb, stun, hs, hy, chip = .15) {
     if (def === P) vib(40);
     if (att === P) game.stats.hits++;
     pops.push({ x: px, y: py - 18, txt: '−' + dmg, col: def === P ? '#ff6b7f' : '#fff', life: 40 });
+    if (def.hp - dmg > 0 && !bark(def, 'hurt')) bark(att, 'atk');
   }
   if (att === P) P.meter = Math.min(100, P.meter + dmg * (blocking ? .5 : 1.5));
   if (def === P) P.meter = Math.min(100, P.meter + dmg * .9);
   def.hp = Math.max(0, def.hp - dmg);
   if (def.hp <= 0) {
     def.state = 'ko'; def.move = null; def.fly = false; def.stun = 0; def.vy = -9; def.kb = dir * 8; def.koT = 0;
-    game.phase = 'ko'; game.t = 0; game.loser = def; slowmo = 50; hitstop = 8; sfx.ko(); shake(9);
+    game.phase = 'ko'; game.t = 0; game.loser = def; slowmo = 50; hitstop = 8; sfx.ko(); shake(9); bark(def, 'ko', true);
     if (def === P) vib([60, 40, 120]);
   }
 }
@@ -421,7 +500,7 @@ function updPlayer(ctrl) {
   const dir = (held.right ? 1 : 0) - (held.left ? 1 : 0);
   if (onG) { f.vx = dir * 4.4; if (consume('jump')) { f.vy = -14; sfx.jump(); } }
   else f.vx += (dir * 4.4 - f.vx) * .1;
-  if (consume('super')) { if (f.meter >= 100) { f.meter = 0; startMove(f, 'super'); } }
+  if (consume('super')) { if (f.meter >= 100) { f.meter = 0; startMove(f, 'super'); bark(f, 'super', true); } }
   else if (consume('punch')) { startMove(f, 'punch'); sfx.whoosh(); }
   else if (consume('kick')) { startMove(f, 'kick'); sfx.whoosh(); }
   if (!f.move) {
@@ -432,11 +511,15 @@ function updPlayer(ctrl) {
   phys(f);
 }
 
-const EDUR = { dash: 64, zap: 82, throw: 40, dive: 100 };
+const EDUR = { dash: 64, zap: 82, throw: 40, dive: 100, butt: 46 };
 function startE(e, mv) { startMove(e, mv); e.vx = 0; e.mdur = mv === 'basic' ? L.basic.dur : EDUR[mv]; if (mv === 'dive') e.fly = true; }
 function pickSpecial(e, d) {
-  if (L.kind === 'crab') return d > 150 ? 'dash' : null;
-  if (L.kind === 'jelly') return d < 200 ? 'zap' : null;
+  const k = L.kind;
+  if (k === 'crab') return d > 150 ? 'dash' : null;
+  if (k === 'jelly') return d < 200 ? 'zap' : null;
+  if (k === 'andrey') return d < 140 ? 'butt' : null;
+  if (k === 'maxim') return d > 140 || Math.random() < .3 ? 'throw' : null;
+  if (k === 'misha') return d > 170 ? (Math.random() < .5 ? 'dash' : 'dive') : (Math.random() < .3 ? 'dive' : null);
   if (d > 190) return Math.random() < .55 ? 'throw' : 'dive';
   return Math.random() < .5 ? 'dive' : null;
 }
@@ -459,8 +542,9 @@ function runEnemyMove(e) {
       if (t === 46) { sfx.zap(); shake(5); }
       if (t >= 46 && t <= 58 && !e.hasHit && Math.abs(P.x - e.x) < 138 && P.y > G - 160) { e.hasHit = true; damage(e, P, 11, 10, 24, 6, P.y - 85); }
       break;
+    case 'butt': { const m = L.heavy; if (t === m.a[0] - 4) sfx.whoosh(); if (t === m.a[0]) shake(2); tryHit(e, P, m); break; }
     case 'throw':
-      if (t === 16) { projs.push({ kind: 'fish', owner: e, x: e.x + e.face * 40, y: e.y - 92, vx: e.face * 7, r: 15, dmg: 8, kb: 6, stun: 16, hs: 4, life: 170 }); sfx.whoosh(); }
+      if (t === 16) { const wd = L.proj === 'words'; projs.push({ kind: L.proj, txt: wd ? WORDS[Math.floor(Math.random() * WORDS.length)] : '', owner: e, x: e.x + e.face * 40, y: e.y - (wd ? 110 : 92), vx: e.face * (wd ? 6 : 7), r: wd ? 22 : 15, dmg: 8, kb: 6, stun: 16, hs: 4, life: 190 }); sfx.whoosh(); }
       break;
     case 'dive':
       if (t <= 48) { e.y += ((G - 250) - e.y) * (t <= 30 ? .12 : .2); e.x += (P.x - e.x) * (t <= 30 ? .03 : .07); faceTo(e, P); }
@@ -495,7 +579,7 @@ function updEnemy(ctrl) {
     pr.seen = true; if (Math.random() < L.block * .8) { e.state = 'block'; e.blockT = 34; e.vx = 0; phys(e); return; }
   }
   if (e.retreat > 0) { e.retreat--; e.vx = -e.face * L.speed * .9; e.state = 'walk'; e.walk += .2; phys(e); return; }
-  if (e.spec <= 0) { const sp = pickSpecial(e, dist); if (sp) { startE(e, sp); e.spec = rand(L.specCd[0], L.specCd[1]); phys(e); return; } }
+  if (e.spec <= 0) { const sp = pickSpecial(e, dist); if (sp) { startE(e, sp); bark(e, 'spec', true); e.spec = rand(L.specCd[0], L.specCd[1]); phys(e); return; } }
   if (dist > L.basic.range * .8) { e.vx = e.face * L.speed; e.state = 'walk'; e.walk += .2; }
   else { e.vx = 0; e.state = 'idle'; if (e.aiAtk <= 0) { startE(e, 'basic'); e.aiAtk = rand(L.atkCd[0], L.atkCd[1]); } }
   phys(e);
@@ -530,7 +614,7 @@ function startFight() { setupLevel(game.lvl); game.phase = 'intro'; game.t = 0; 
 function winFlow() {
   const i = game.lvl; showPad(false);
   runStory(STORY.post[i], () => {
-    if (i < 2) { setupLevel(i + 1); runStory(STORY.pre[i + 1], startFight); }
+    if (i < LEVELS.length - 1) { setupLevel(i + 1); runStory(STORY.pre[i + 1], startFight); }
     else showEnd();
   });
 }
@@ -549,8 +633,11 @@ function showEnd() {
 $('play').addEventListener('click', () => {
   audioInit(); $('title').hidden = true;
   game.stats = { start: performance.now(), hits: 0, loss: 0 };
+  const dbg = /^#f(\d)$/.exec(location.hash);
+  if (dbg) { setupLevel(Math.min(5, +dbg[1])); runStory(STORY.pre[game.lvl], startFight); return; }
   setupLevel(0); runStory([...STORY.intro, ...STORY.pre[0]], startFight);
 });
+$('voiceBtn').addEventListener('click', () => { setVoice(!voiceOn); if (voiceOn) say('Робоголос включён, сука.', 'yarik'); });
 $('retry').addEventListener('click', () => { $('lose').hidden = true; startFight(); });
 $('again').addEventListener('click', () => { $('end').hidden = true; $('title').hidden = false; game.phase = 'title'; setupLevel(0); });
 
@@ -564,6 +651,7 @@ function nextLine() {
   dlg.classList.toggle('narr', cur.who === 'narr');
   dlg.style.setProperty('--wc', w.col);
   $('who').textContent = w.name;
+  say(cur.text, cur.who);
   if (cur.who !== 'narr') { const pc = $('por'), g = pc.getContext('2d'); g.clearRect(0, 0, pc.width, pc.height); drawPortrait(g, cur.who, 76, 76, 76, '#1d2440'); }
 }
 function storyTap() { if (!cur) return; if (typed < cur.text.length) typed = cur.text.length; else nextLine(); }
@@ -579,6 +667,8 @@ function update() {
   for (const p of parts) { p.x += p.vx; p.y += p.vy; p.vy += .35; p.life--; }
   parts = parts.filter(p => p.life > 0);
   for (const p of pops) { p.y -= .8; p.life--; }
+  for (const b of bubbles) b.life--;
+  bubbles = bubbles.filter(b => b.life > 0);
   pops = pops.filter(p => p.life > 0);
   if (shakeT > 0) { shakeT--; if (!shakeT) shakeM = 0; }
 
@@ -612,52 +702,110 @@ function limb(g, x, y, a1, l1, a2, l2, w, col) {
 const IDLE = { bt: -.3, bs: -.12, ft: .34, fs: .06, ub: .55, fb: 2.7, uf: .95, ff: 2.55, lean: 0 };
 const lerpP = (a, b, k) => { const o = {}; for (const key in a) o[key] = a[key] + (b[key] - a[key]) * k; return o; };
 function yPose(f, time) {
-  const p = { ...IDLE }, t = f.t;
+  const p = { ...IDLE }, t = f.t, hum = f.kind === 'yarik',
+    mv = hum ? f.move : ({ basic: 'punch', throw: 'super', dash: 'dash', butt: 'butt' })[f.move],
+    md = hum ? PM[f.move] : f.move === 'basic' ? L.basic : null;
   if (f.state === 'idle') { const b = Math.sin(time * .1) * .05; p.uf += b; p.ub -= b; }
   if (f.state === 'walk') { const s = Math.sin(f.walk); p.bt = -.05 - s * .45; p.ft = .1 + s * .45; p.bs = p.bt - .15; p.fs = p.ft - .15; }
-  if (f.state === 'jump' || (f.y < f.ground - 2 && !f.move)) Object.assign(p, { bt: -.2, bs: -1.1, ft: .9, fs: -.1 });
+  if (f.state === 'jump' || (f.y < f.ground - 2 && (!f.move || f.move === 'dive'))) Object.assign(p, { bt: -.2, bs: -1.1, ft: .9, fs: -.1 });
   if (f.state === 'block') Object.assign(p, { uf: .3, ff: 3.05, ub: .15, fb: 3.1, lean: -.06 });
   if (f.state === 'hit') Object.assign(p, { ub: -.4, fb: .3, uf: .2, ff: .9, lean: -.28, ft: .5 });
-  if (f.move === 'punch') {
+  if (mv === 'punch') {
     const A = { ...p, uf: 1.57, ff: 1.57, ub: .4, fb: 2.9, lean: .12 };
-    const k = t < 4 ? t / 4 : t <= 9 ? 1 : 1 - (t - 9) / 9; return lerpP(p, A, Math.max(0, k));
+    const a = md.a, k = t < a[0] ? t / a[0] : t <= a[1] ? 1 : 1 - (t - a[1]) / (md.dur - a[1]); return lerpP(p, A, Math.max(0, k));
   }
-  if (f.move === 'kick') {
+  if (mv === 'kick') {
     const C = { ...p, ft: 1.25, fs: .25, lean: -.08 }, A = { ...p, ft: 1.62, fs: 1.55, lean: -.22, uf: .6, ff: 2.6, ub: .1, fb: 1.2 };
     if (t < 8) return lerpP(p, C, t / 8);
     if (t <= 14) return lerpP(C, A, Math.min(1, (t - 8) / 2));
     return lerpP(A, p, (t - 14) / 12);
   }
-  if (f.move === 'super') {
+  if (mv === 'super') {
     const B = { ...p, uf: -.7, ff: -.3, ub: -.7, fb: -.4, lean: -.15 }, A = { ...p, uf: 1.57, ff: 1.57, ub: 1.45, fb: 1.52, lean: .15, ft: .55, bt: -.5 };
     if (t < 12) return lerpP(p, B, t / 12);
     if (t < 18) return lerpP(B, A, (t - 12) / 6);
     return lerpP(A, p, Math.max(0, (t - 30) / 14));
   }
+  if (mv === 'dash') Object.assign(p, { lean: .5, ub: -.7, fb: -.4, uf: -.5, ff: -.2, bt: -.6, bs: -.3, ft: .7, fs: .2 });
+  if (mv === 'butt') Object.assign(p, { ub: .3, fb: .6, uf: .4, ff: .8 });
   return p;
 }
-function drawYarik(g, f, time) {
-  const p = yPose(f, time);
+const LOOKS = {
+  yarik: { jacket: '#1a1d23', sleeve: '#1f232b', sleeveB: '#0f1115', shirt: '#2e6e5c', jeans: '#25304d', jeans2: '#2f3c60', shoe: '#f1f1f4', skin: '#ecbfa0' },
+  andrey: { jacket: '#2347a8', sleeve: '#2a52bd', sleeveB: '#1a3480', shirt: '#ffffff', jeans: '#1d3585', jeans2: '#2347a8', shoe: '#151515', skin: '#e8b898', stripes: true, butt: true },
+  maxim: { jacket: '#3f8f3a', sleeve: '#47a041', sleeveB: '#2f6e2b', shirt: '#ffd23f', jeans: '#4a4a55', jeans2: '#575763', shoe: '#e94f37', skin: '#f6cdb0' },
+  misha: { jacket: '#151515', sleeve: '#1d1d1d', sleeveB: '#0c0c0c', shirt: '#c8102e', jeans: '#5a6b8c', jeans2: '#6a7b9c', shoe: '#2a2a2a', skin: '#e6b594', spikes: true }
+};
+function headCartoon(g, kind) {
+  const sk = LOOKS[kind].skin, cx = 2, cy = -172;
+  const line = (x1, y1, x2, y2, col, w) => { g.strokeStyle = col; g.lineWidth = w; g.lineCap = 'round'; g.beginPath(); g.moveTo(cx + x1, cy + y1); g.lineTo(cx + x2, cy + y2); g.stroke(); };
+  const eye = (x, y, rx, ry, px) => { g.fillStyle = '#fff'; g.beginPath(); g.ellipse(cx + x, cy + y, rx, ry, 0, 0, 7); g.fill(); g.fillStyle = '#1a1a1a'; g.beginPath(); g.arc(cx + x + px, cy + y + .5, Math.min(rx, ry) * .6, 0, 7); g.fill(); };
+  if (kind === 'misha') {
+    for (let i = 0; i < 6; i++) {
+      const x = cx - 18 + i * 7.5; g.fillStyle = i % 2 ? '#ff3fa4' : '#39e86a';
+      g.beginPath(); g.moveTo(x - 5, cy - 30); g.lineTo(x + 1 + i, cy - 76 + Math.abs(i - 2.5) * 6); g.lineTo(x + 6, cy - 30); g.closePath(); g.fill();
+    }
+  }
+  g.fillStyle = sk; g.beginPath(); g.ellipse(cx - 28, cy + 2, 6, 9, 0, 0, 7); g.ellipse(cx + 30, cy + 2, 6, 9, 0, 0, 7); g.fill();
+  g.beginPath(); g.ellipse(cx, cy, 29, 40, 0, 0, 7); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 2; g.stroke();
+  g.strokeStyle = 'rgba(120,60,40,.6)'; g.lineWidth = 2; g.beginPath(); g.moveTo(cx + 12, cy - 2); g.quadraticCurveTo(cx + 19, cy + 8, cx + 11, cy + 10); g.stroke();
+  if (kind === 'andrey') {
+    g.fillStyle = '#3b2416'; g.beginPath(); g.ellipse(cx, cy - 20, 31, 24, 0, Math.PI, 0); g.quadraticCurveTo(cx + 8, cy - 30, cx - 31, cy - 12); g.closePath(); g.fill();
+    eye(-7, -6, 6, 4.5, 2); eye(15, -6, 6, 4.5, 2);
+    g.fillStyle = sk; g.fillRect(cx - 14, cy - 12, 14, 4); g.fillRect(cx + 8, cy - 12, 14, 4);
+    line(-14, -17, -1, -15, '#3b2416', 3); line(8, -20, 21, -15, '#3b2416', 3);
+    g.fillStyle = '#5a1a1a'; g.beginPath(); g.ellipse(cx + 6, cy + 21, 6, 5, 0, 0, 7); g.fill();
+  } else if (kind === 'maxim') {
+    g.fillStyle = '#e8662a'; g.beginPath(); g.moveTo(cx - 30, cy - 4);
+    for (let i = 0; i <= 8; i++) { const a = Math.PI + i * Math.PI / 8, r = i % 2 ? 46 : 35; g.lineTo(cx + Math.cos(a) * r, cy - 8 + Math.sin(a) * r * .95); }
+    g.lineTo(cx + 30, cy - 4); g.quadraticCurveTo(cx, cy - 26, cx - 30, cy - 4); g.fill();
+    g.fillStyle = '#c8562e'; for (const [x, y] of [[-12, 6], [-8, 10], [-15, 11], [16, 6], [20, 10], [13, 11], [2, 4]]) { g.beginPath(); g.arc(cx + x, cy + y, 1.7, 0, 7); g.fill(); }
+    eye(-7, -6, 7.5, 7.5, 3); eye(15, -5, 5, 5, -1.5);
+    line(-14, -18, -1, -20, '#d0581f', 3); line(9, -14, 21, -18, '#d0581f', 3);
+    g.strokeStyle = '#6a2a1a'; g.lineWidth = 2.5; g.beginPath(); g.moveTo(cx - 6, cy + 20); g.quadraticCurveTo(cx - 1, cy + 15, cx + 4, cy + 20); g.quadraticCurveTo(cx + 9, cy + 25, cx + 14, cy + 19); g.stroke();
+  } else if (kind === 'misha') {
+    g.fillStyle = 'rgba(40,30,30,.25)'; g.beginPath(); g.ellipse(cx, cy - 18, 29, 22, 0, Math.PI, 0); g.fill();
+    eye(-7, -6, 6, 3.5, 2); eye(15, -6, 6, 3.5, 2);
+    line(-14, -15, 0, -10, '#222', 3.5); line(8, -10, 22, -15, '#222', 3.5);
+    g.strokeStyle = '#ffd23f'; g.lineWidth = 2; g.beginPath(); g.arc(cx + 31, cy + 12, 4, 0, 7); g.stroke();
+    g.fillStyle = '#5a1a1a'; rr(g, cx - 6, cy + 14, 22, 10, 4); g.fill();
+    g.fillStyle = '#fff'; for (let i = 0; i < 5; i++) if (i !== 2) g.fillRect(cx - 5 + i * 4.2, cy + 14.5, 3.6, 4.5);
+  }
+}
+function drawHuman(g, f, time) {
+  const lk = LOOKS[f.kind], p = yPose(f, time);
+  let fc = f.face;
+  if (f.move === 'butt') { const t = f.t, a = L.heavy.a; if (t < a[1] + 10) { fc = -fc; p.lean += t < a[0] ? t / a[0] * .55 : .55; } }
   g.save(); g.translate(f.x, f.y);
   if (f.state === 'ko') g.rotate(-f.face * Math.min(1, f.koT / 16) * 1.5);
-  g.scale(f.face, 1);
-  const fist = r => { g.fillStyle = '#ecbfa0'; g.beginPath(); g.arc(r[0], r[1], 7.5, 0, Math.PI * 2); g.fill(); };
-  const shoe = r => { g.fillStyle = '#f1f1f4'; g.beginPath(); g.ellipse(r[0] + 4, r[1] - 3, 10, 6, 0, 0, Math.PI * 2); g.fill(); };
+  g.scale(fc, 1);
+  const fist = r => { g.fillStyle = lk.skin; g.beginPath(); g.arc(r[0], r[1], 7.5, 0, Math.PI * 2); g.fill(); };
+  const shoe = r => { g.fillStyle = lk.shoe; g.beginPath(); g.ellipse(r[0] + 4, r[1] - 3, 10, 6, 0, 0, Math.PI * 2); g.fill(); };
+  const stripe = (x, y, a1, l1, a2, l2) => { if (lk.stripes) limb(g, x, y, a1, l1, a2, l2, 3, 'rgba(255,255,255,.9)'); };
   const lean = () => { g.translate(0, -72); g.rotate(p.lean); g.translate(0, 72); };
-  g.save(); lean(); fist(limb(g, -6, -122, p.ub, 30, p.fb, 27, 13, '#0f1115')); g.restore();
-  shoe(limb(g, -4, -74, p.bt, 38, p.bs, 36, 16, '#25304d'));
-  shoe(limb(g, 4, -74, p.ft, 38, p.fs, 36, 16, '#2f3c60'));
+  g.save(); lean(); fist(limb(g, -6, -122, p.ub, 30, p.fb, 27, 13, lk.sleeveB)); stripe(-6, -122, p.ub, 30, p.fb, 22); g.restore();
+  shoe(limb(g, -4, -74, p.bt, 38, p.bs, 36, 16, lk.jeans)); stripe(-4, -74, p.bt, 38, p.bs, 30);
+  if (lk.butt) {
+    g.save(); lean(); g.fillStyle = lk.jeans2; g.beginPath(); g.arc(-18, -82, 24, 0, 7); g.arc(-13, -64, 22, 0, 7); g.fill();
+    g.strokeStyle = 'rgba(0,0,0,.3)'; g.lineWidth = 2; g.beginPath(); g.moveTo(-40, -74); g.quadraticCurveTo(-26, -70, -18, -58); g.stroke(); g.restore();
+  }
+  shoe(limb(g, 4, -74, p.ft, 38, p.fs, 36, 16, lk.jeans2)); stripe(4, -74, p.ft, 38, p.fs, 30);
   g.save(); lean();
-  g.fillStyle = '#1a1d23'; rr(g, -21, -134, 42, 68, 12); g.fill();
-  g.fillStyle = '#2e6e5c'; g.beginPath(); g.moveTo(-9, -134); g.lineTo(9, -134); g.lineTo(0, -114); g.closePath(); g.fill();
-  g.strokeStyle = '#3a3f4a'; g.lineWidth = 2; g.beginPath(); g.moveTo(2, -114); g.lineTo(2, -68); g.stroke();
-  g.fillStyle = '#e5b496'; g.fillRect(-6, -142, 12, 10);
-  g.save(); g.beginPath(); g.ellipse(2, -174, 32, 47, 0, 0, Math.PI * 2); g.clip();
-  if (face.complete && face.naturalWidth) g.drawImage(face, -30, -223, 64, 98); else { g.fillStyle = '#e5b496'; g.fill(); }
-  if (f.flash > 0) { g.fillStyle = 'rgba(255,40,60,.35)'; g.fillRect(-40, -230, 80, 110); }
-  g.restore();
-  g.strokeStyle = 'rgba(0,0,0,.45)'; g.lineWidth = 2.5; g.beginPath(); g.ellipse(2, -174, 32, 47, 0, 0, Math.PI * 2); g.stroke();
-  fist(limb(g, 6, -122, p.uf, 30, p.ff, 27, 13, '#1f232b'));
+  g.fillStyle = lk.jacket; rr(g, -21, -134, 42, 68, 12); g.fill();
+  g.fillStyle = lk.shirt; g.beginPath(); g.moveTo(-9, -134); g.lineTo(9, -134); g.lineTo(0, -114); g.closePath(); g.fill();
+  g.strokeStyle = 'rgba(255,255,255,.18)'; g.lineWidth = 2; g.beginPath(); g.moveTo(2, -114); g.lineTo(2, -68); g.stroke();
+  if (lk.stripes) { g.strokeStyle = '#fff'; g.lineWidth = 3; g.beginPath(); g.moveTo(-17, -128); g.lineTo(-17, -70); g.moveTo(17, -128); g.lineTo(17, -70); g.stroke(); }
+  if (lk.spikes) { g.fillStyle = '#cfd3da'; for (const x of [-16, -6, 6, 16]) { g.beginPath(); g.moveTo(x - 4, -131); g.lineTo(x, -143); g.lineTo(x + 4, -131); g.fill(); } }
+  g.fillStyle = lk.skin; g.fillRect(-6, -142, 12, 10);
+  if (f.kind === 'yarik') {
+    g.save(); g.beginPath(); g.ellipse(2, -174, 32, 47, 0, 0, Math.PI * 2); g.clip();
+    if (face.complete && face.naturalWidth) g.drawImage(face, -30, -223, 64, 98); else { g.fillStyle = lk.skin; g.fill(); }
+    g.restore();
+    g.strokeStyle = 'rgba(0,0,0,.45)'; g.lineWidth = 2.5; g.beginPath(); g.ellipse(2, -174, 32, 47, 0, 0, Math.PI * 2); g.stroke();
+  } else headCartoon(g, f.kind);
+  if (f.flash > 0) { g.fillStyle = 'rgba(255,40,60,.35)'; g.beginPath(); g.ellipse(2, -172, 32, 46, 0, 0, Math.PI * 2); g.fill(); }
+  fist(limb(g, 6, -122, p.uf, 30, p.ff, 27, 13, lk.sleeve)); stripe(6, -122, p.uf, 30, p.ff, 22);
   g.restore(); g.restore();
 }
 function pincer(g, x, y, s, open) {
@@ -792,12 +940,13 @@ function drawGull(g, f, time) {
   rr(g, hx + 16, hy - 28, 4, 13, 2); g.fill(); g.stroke();
   g.restore();
 }
-const DRAW = { yarik: drawYarik, crab: drawCrab, jelly: drawJelly, gull: drawGull };
+const DRAW = { yarik: drawHuman, andrey: drawHuman, maxim: drawHuman, misha: drawHuman, crab: drawCrab, jelly: drawJelly, gull: drawGull };
 const POR = { crab: { s: 1 / 70, oy: 52 }, jelly: { s: 1 / 60, oy: 104 }, gull: { s: 1 / 52, oy: 108, ox: -14 } };
 function drawPortrait(g, kind, cx, cy, R, bg) {
   g.save(); g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.clip();
   g.fillStyle = bg; g.fillRect(cx - R, cy - R, R * 2, R * 2);
   if (kind === 'yarik') { if (face.complete) g.drawImage(face, cx - 1.05 * R, cy - 1.45 * R, 2.1 * R, 3.2 * R); }
+  else if (LOOKS[kind]) { const s = R / 52; g.translate(cx - 2 * s, cy + 168 * s); g.scale(s, s); headCartoon(g, kind); }
   else {
     const p = POR[kind], s = p.s * R;
     g.translate(cx + (p.ox || 0) * s, cy + p.oy * s); g.scale(s, s);
@@ -811,7 +960,7 @@ let bgC = document.createElement('canvas'), bgKey = '';
 function buildBg() {
   bgC.width = cv.width; bgC.height = cv.height;
   const g = bgC.getContext('2d'); g.setTransform(scale, 0, 0, scale, 0, 0);
-  const lv = game.lvl, HZ = 238, FL = 305;
+  const lv = L.bg, HZ = 238, FL = 305;
   const grad = (y0, y1, stops) => { const gr = g.createLinearGradient(0, y0, 0, y1); stops.forEach((c, i) => gr.addColorStop(i / (stops.length - 1), c)); return gr; };
   if (lv === 0) {
     g.fillStyle = grad(0, HZ, ['#4fb2ee', '#9ad8f7', '#d6f1ff']); g.fillRect(0, 0, W, HZ);
@@ -860,7 +1009,7 @@ function buildBg() {
   bgKey = lv + '_' + cv.width + 'x' + cv.height;
 }
 function drawLive(time) {
-  const lv = game.lvl, HZ = 238, FL = 305;
+  const lv = L.bg, HZ = 238, FL = 305;
   if (lv === 0) {
     ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 2;
     for (let r = 0; r < 3; r++) { ctx.beginPath(); const y = HZ + 16 + r * 18; for (let x = 0; x <= W; x += 16) { const yy = y + Math.sin(x * .03 + time * .04 + r) * 2.5; x ? ctx.lineTo(x, yy) : ctx.moveTo(x, yy); } ctx.stroke(); }
@@ -884,6 +1033,11 @@ function drawProj(pr, time) {
     ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(0, 0, 40, 0, 7); ctx.fill();
     ctx.strokeStyle = '#f6d58e'; ctx.lineWidth = 3; ctx.rotate(time * .3);
     for (let i = 0; i < 3; i++) { ctx.rotate(Math.PI * 2 / 3); ctx.beginPath(); ctx.arc(0, 0, 20, 0, 1.6); ctx.stroke(); }
+  } else if (pr.kind === 'words') {
+    ctx.rotate(Math.sin(time * .2) * .15);
+    ctx.font = '16px "Russo One", sans-serif'; const tw = ctx.measureText(pr.txt).width + 20;
+    rr(ctx, -tw / 2, -16, tw, 32, 14); ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = '#e8662a'; ctx.lineWidth = 3; ctx.stroke();
+    ctx.fillStyle = '#e8662a'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(pr.txt, 0, 1);
   } else {
     ctx.scale(Math.sign(pr.vx), 1); ctx.rotate(Math.sin(time * .4) * .25);
     ctx.fillStyle = '#ff9f43'; ctx.beginPath(); ctx.ellipse(0, 0, 18, 10, 0, 0, 7); ctx.fill();
@@ -897,6 +1051,23 @@ function drawFighter(f, time) {
   ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.beginPath(); ctx.ellipse(f.x, G + 2, sw, 8, 0, 0, 7); ctx.fill();
   if (f.flash > 0 && f.flash % 4 < 2) ctx.globalAlpha = .55;
   DRAW[f.kind](ctx, f, time);
+  ctx.globalAlpha = 1;
+}
+function drawBubbles() {
+  ctx.font = '600 15px Rubik, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const b of bubbles) {
+    const f = b.f, words = b.text.split(' '), lines = []; let ln = '';
+    for (const w of words) { const t = ln ? ln + ' ' + w : w; if (ctx.measureText(t).width > 210 && ln) { lines.push(ln); ln = w; } else ln = t; }
+    lines.push(ln);
+    const bw = Math.max(...lines.map(l => ctx.measureText(l).width)) + 22, bh = lines.length * 19 + 12;
+    const top = LOOKS[f.kind] ? f.y - 232 : f.y - f.h - 34;
+    const x = Math.max(bw / 2 + 6, Math.min(W - bw / 2 - 6, f.x)), y = Math.max(84, top - bh);
+    const tx = Math.max(x - bw / 2 + 14, Math.min(x + bw / 2 - 14, f.x));
+    ctx.globalAlpha = Math.min(1, b.life / 15);
+    ctx.fillStyle = '#fff'; rr(ctx, x - bw / 2, y, bw, bh, 10); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(tx - 7, y + bh - 1); ctx.lineTo(tx, y + bh + 10); ctx.lineTo(tx + 7, y + bh - 1); ctx.fill();
+    ctx.fillStyle = '#10131f'; lines.forEach((l, i) => ctx.fillText(l, x, y + 15.5 + i * 19));
+  }
   ctx.globalAlpha = 1;
 }
 function txt(s, x, y, size, col, align = 'left', stroke = 5) {
@@ -924,7 +1095,7 @@ function hud(time) {
   const full = P.meter >= 100;
   ctx.fillStyle = full ? (frame % 20 < 10 ? '#ffd23f' : '#fff3a8') : '#ffb703'; rr(ctx, 72, 68, 160 * P.meter / 100, 6, 3); ctx.fill();
   if (full) txt('СУПЕР ГОТОВ', 242, 71, 11, '#ffd23f', 'left', 3);
-  txt(`БОЙ ${game.lvl + 1}/3`, W / 2, 26, 14, '#fff', 'center', 4);
+  txt(`БОЙ ${game.lvl + 1}/${LEVELS.length}`, W / 2, 26, 14, '#fff', 'center', 4);
   txt(L.place, W / 2, 46, 11, 'rgba(255,255,255,.75)', 'center', 3);
 }
 function bigText(s, k, col, size = 74) {
@@ -947,6 +1118,7 @@ function render(time) {
   ctx.globalAlpha = 1;
   for (const p of pops) { ctx.globalAlpha = Math.min(1, p.life / 15); txt(p.txt, p.x, p.y, 18, p.col, 'center', 4); }
   ctx.globalAlpha = 1;
+  drawBubbles();
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
   const ph = game.phase;
   if (ph === 'intro' || ph === 'fight' || ph === 'ko') hud(time);
@@ -973,6 +1145,7 @@ function loop(ts) {
   render(frame);
 }
 setupLevel(0);
+setVoice(voiceOn);
 layout();
 if (document.fonts && document.fonts.load) document.fonts.load('20px "Russo One"').then(() => { bgKey = ''; }).catch(() => {});
 face.onload = () => { if (cur && cur.who === 'yarik') nextLineRedraw(); };
